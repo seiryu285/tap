@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap Records - 音楽の未来</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background: #ffffff;
+            color: #000000;
+            overflow-x: hidden;
+            height: 100vh;
+        }
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 1rem;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        .logo {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            font-size: 24px;
+            font-weight: bold;
+            color: #000;
+            text-decoration: none;
+        }
+        #scene-container {
+            width: 100%;
+            height: 100vh;
+            cursor: pointer;
+        }
+        .controls {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            display: flex;
+            gap: 1rem;
+        }
+        .controls.visible {
+            opacity: 1;
+        }
+        .btn {
+            background-color: #000000;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            min-width: 120px;
+        }
+        .btn:hover {
+            background-color: #333;
+            transform: translateY(-2px);
+        }
+        #now-playing {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #000000;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">Tap Records</div>
+    </header>
+
+    <div id="scene-container"></div>
+    
+    <div class="controls">
+        <button id="play-btn" class="btn">再生</button>
+        <button id="stop-btn" class="btn">停止</button>
+    </div>
+
+    <div id="now-playing">
+        Now Playing: Tap Records
+    </div>
+
+    <script>
+        let scene, camera, renderer, record, recordGroup;
+        let albumCovers = [];
+        let isPlaying = false;
+        let selectedAlbum = null;
+        let hoveredAlbum = null;
+
+        const albumTextures = [
+            'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/スクリーンショット%202024-11-09%20190019-zwVYUcH4SCkN1XaqoRC2UCuV6H7Bzx.png',
+            'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/スクリーンショット%202024-06-04%20093643-a9ty4JiOyS4T06JJUu6dnmf9cCm4cM.png',
+            'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/スクリーンショット%202024-08-03%20194532-nEpyXZKSXuVlDAoTjYKBOiExL9qhDb.png',
+            'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/output-NqSJF0xpKygsoCMekpmT439ZUiGlMC.png',
+            'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/33.jpg-ZeROy3Fa9NwXNP5ZFildcshDCTUaFZ.jpeg'
+        ];
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0xffffff, 1);
+            document.getElementById('scene-container').appendChild(renderer.domElement);
+
+            camera.position.z = 40;
+            camera.position.y = 0;
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            createAlbumCovers();
+            createRecord();
+
+            window.addEventListener('resize', onWindowResize, false);
+            renderer.domElement.addEventListener('click', onMouseClick, false);
+            renderer.domElement.addEventListener('mousemove', onMouseMove, false);
+
+            animate();
+        }
+
+        function createAlbumCovers() {
+            const textureLoader = new THREE.TextureLoader();
+            
+            for (let i = 0; i < 5; i++) {
+                const geometry = new THREE.PlaneGeometry(20, 20);
+                const material = new THREE.MeshPhysicalMaterial({
+                    map: textureLoader.load(albumTextures[i]),
+                    metalness: 0.1,
+                    roughness: 0.5,
+                    reflectivity: 0.5,
+                    clearcoat: 0.3,
+                });
+                const cover = new THREE.Mesh(geometry, material);
+                cover.position.set(i * 5 - 10, -i * 0.4, -i * 0.2);
+                cover.rotation.y = -Math.PI / 32;
+                cover.userData = { 
+                    originalPosition: cover.position.clone(),
+                    originalRotation: cover.rotation.clone()
+                };
+                scene.add(cover);
+                albumCovers.push(cover);
+            }
+        }
+
+        function createRecord() {
+            recordGroup = new THREE.Group();
+
+            const vinylGeometry = new THREE.CircleGeometry(24, 128);
+            const vinylMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0x000000,
+                metalness: 0.7,
+                roughness: 0.2,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.1,
+                reflectivity: 1.0
+            });
+            const vinyl = new THREE.Mesh(vinylGeometry, vinylMaterial);
+            recordGroup.add(vinyl);
+
+            const grooveCount = 20;
+            const grooveSpacing = (19.2 - 7.2) / grooveCount;
+            for (let i = 0; i < grooveCount; i++) {
+                const radius = 7.2 + i * grooveSpacing;
+                const grooveGeometry = new THREE.RingGeometry(radius, radius + 0.2, 180);
+                const grooveMaterial = new THREE.MeshPhysicalMaterial({
+                    color: 0x1a1a1a,
+                    metalness: 0.4,
+                    roughness: 0.5,
+                    clearcoat: 0.8,
+                });
+                const groove = new THREE.Mesh(grooveGeometry, grooveMaterial);
+                groove.position.z = 0.001;
+                recordGroup.add(groove);
+            }
+
+            const outerRingGeometry = new THREE.RingGeometry(23.6, 24, 128);
+            const outerRingMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0x333333,
+                metalness: 0.9,
+                roughness: 0.2,
+                clearcoat: 1.0,
+            });
+            const outerRing = new THREE.Mesh(outerRingGeometry, outerRingMaterial);
+            outerRing.position.z = 0.002;
+            recordGroup.add(outerRing);
+
+            const labelGeometry = new THREE.CircleGeometry(7.2, 64);
+            const labelMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff,
+                metalness: 0.1,
+                roughness: 0.4,
+                clearcoat: 0.5,
+            });
+            const label = new THREE.Mesh(labelGeometry, labelMaterial);
+            label.position.z = 0.002;
+            recordGroup.add(label);
+
+            const textureLoader = new THREE.TextureLoader();
+            const logoTexture = textureLoader.load('https://hebbkx1anhila5yf.public.blob.vercel-storage.com/bar%20(2)-RYXRfujrNkbhAyvYlQoZ7hGItbYlVD.png');
+            const logoGeometry = new THREE.CircleGeometry(6.8, 64);
+            const logoMaterial = new THREE.MeshBasicMaterial({
+                map: logoTexture,
+                transparent: true,
+                alphaTest: 0.1,
+            });
+            const logo = new THREE.Mesh(logoGeometry, logoMaterial);
+            logo.position.z = 0.003;
+            recordGroup.add(logo);
+
+            const holeGeometry = new THREE.CircleGeometry(0.3, 32);
+            const holeMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0x000000,
+                metalness: 0.8,
+                roughness: 0.2,
+            });
+            const hole = new THREE.Mesh(holeGeometry, holeMaterial);
+            hole.position.z = 0.004;
+            recordGroup.add(hole);
+
+            recordGroup.position.set(0, 0, 10);
+            recordGroup.rotation.x = -Math.PI / 6;
+            recordGroup.visible = false;
+            scene.add(recordGroup);
+        }
+
+        function onMouseMove(event) {
+            if (recordGroup.visible) return;
+
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(albumCovers);
+
+            albumCovers.forEach(cover => {
+                if (intersects.length > 0 && intersects[0].object === cover) {
+                    if (hoveredAlbum !== cover) {
+                        new TWEEN.Tween(cover.position)
+                            .to({ 
+                                x: cover.userData.originalPosition.x + 1,
+                                z: cover.userData.originalPosition.z + 1
+                            }, 300)
+                            .easing(TWEEN.Easing.Quadratic.Out)
+                            .start();
+                        hoveredAlbum = cover;
+                    }
+                } else if (cover !== selectedAlbum) {
+                    new TWEEN.Tween(cover.position)
+                        .to(cover.userData.originalPosition, 300)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .start();
+                }
+            });
+        }
+
+        function onMouseClick(event) {
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(albumCovers);
+
+            if (intersects.length > 0) {
+                const clickedAlbum = intersects[0].object;
+        
+                if (selectedAlbum === clickedAlbum) {
+                    hideRecord();
+                } else {
+                    showRecord(clickedAlbum);
+                }
+            }
+        }
+
+        function showRecord(clickedAlbum) {
+            selectedAlbum = clickedAlbum;
+
+            // Hide all album covers except the clicked one
+            albumCovers.forEach(cover => {
+                cover.visible = false;
+            });
+
+            // Position the record centered and facing forward
+            recordGroup.position.set(0, 0, 5);
+            recordGroup.rotation.set(0, 0, 0);
+
+            // Show the record with a nice animation
+            recordGroup.visible = true;
+            recordGroup.scale.set(0.1, 0.1, 0.1);
+            new TWEEN.Tween(recordGroup.scale)
+                .to({ x: 1, y: 1, z: 1 }, 500)
+                .easing(TWEEN.Easing.Back.Out)
+                .start();
+
+            document.querySelector('.controls').classList.add('visible');
+        }
+
+        function hideRecord() {
+            // Hide the record with a nice animation
+            new TWEEN.Tween(recordGroup.scale)
+                .to({ x: 0.1, y: 0.1, z: 0.1 }, 500)
+                .easing(TWEEN.Easing.Back.In)
+                .onComplete(() => {
+                    recordGroup.visible = false;
+                })
+                .start();
+    
+            // Show all album covers and reset their positions
+            albumCovers.forEach(cover => {
+                cover.visible = true;
+                new TWEEN.Tween(cover.position)
+                    .to(cover.userData.originalPosition, 500)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .start();
+                new TWEEN.Tween(cover.rotation)
+                    .to(cover.userData.originalRotation, 500)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .start();
+            });
+    
+            selectedAlbum = null;
+            document.querySelector('.controls').classList.remove('visible');
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            TWEEN.update();
+
+            if (isPlaying && recordGroup.visible) {
+                recordGroup.rotation.z += 0.02;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        init();
+
+        document.getElementById('play-btn').addEventListener('click', function() {
+            if (selectedAlbum !== null) {
+                isPlaying = true;
+                this.textContent = '一時停止';
+                document.getElementById('now-playing').style.display = 'flex';
+            }
+        });
+
+        document.getElementById('stop-btn').addEventListener('click', function() {
+            isPlaying = false;
+            document.getElementById('play-btn').textContent = '再生';
+            document.getElementById('now-playing').style.display = 'none';
+        });
+    </script>
+</body>
+</html>
